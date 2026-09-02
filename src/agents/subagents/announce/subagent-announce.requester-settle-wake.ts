@@ -332,7 +332,7 @@ export async function maybeWakeRequesterAfterAllChildrenSettled(params: {
       deferRequesterSettleWakeBatch({
         batchRunIds,
         state: selectedState,
-        countTowardsLimit: countActiveDescendantRuns(requesterSessionKey) === 0,
+        countTowardsLimit: countActiveDescendantRuns(requesterSessionKey, requesterAgentId) === 0,
         transitionBatch: params.transitionBatch,
         completeBatch,
       });
@@ -427,7 +427,7 @@ export async function maybeWakeRequesterAfterAllChildrenSettled(params: {
       deferRequesterSettleWakeBatch({
         batchRunIds,
         state,
-        countTowardsLimit: countActiveDescendantRuns(requesterSessionKey) === 0,
+        countTowardsLimit: countActiveDescendantRuns(requesterSessionKey, requesterAgentId) === 0,
         transitionBatch: params.transitionBatch,
         completeBatch,
       });
