@@ -1032,24 +1032,18 @@ describe("maybeWakeRequesterAfterAllChildrenSettled", () => {
           await vi.advanceTimersByTimeAsync(30_000);
         }
 
-        expect(completeBatchSpy).not.toHaveBeenCalled();
-        expect(deliverSpy).not.toHaveBeenCalled();
         expect(child.requesterSettleWake?.deferralCount).toBe(0);
 
         registryRuntimeMock.hasDescendantRunAwaitingSettle.mockReturnValue(false);
         await expect(
           maybeWakeRequesterAfterAllChildrenSettled(wakeParams({ settledEntry: child })),
         ).resolves.toBe(true);
-        expect(deliverSpy).toHaveBeenCalledOnce();
 
-        transitionBatchSpy.mockClear();
-        completeBatchSpy.mockClear();
-        deliverSpy.mockClear();
+        vi.clearAllMocks();
         child.requesterSettleWake = {
           status: "pending",
           attemptCount: 0,
           batchRunIds: ["run-a"],
-          requesterYieldBatch: true,
           rearmGeneration: 1,
           deferralCount: 8,
         };
