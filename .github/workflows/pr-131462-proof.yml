@@ -1,0 +1,59 @@
+name: PR 131462 heartbeat proof
+on:
+  push:
+    branches: [codex/proof-131462]
+permissions:
+  contents: read
+jobs:
+  compare:
+    if: github.repository == 'aldiz1711/openclaw'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        include:
+          - variant: before
+            revision: 7a2e4eb07446229e851fb1d8dc11bd533dcf5f0d
+          - variant: after
+            revision: b27f4a9217ce6c1313c5555bcc492b9ba705687f
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+          sparse-checkout: proof/pr-131462
+      - name: Download immutable public source
+        env:
+          PROOF_REVISION: ${{ matrix.revision }}
+        run: |
+          set -euo pipefail
+          mkdir -p candidate results
+          curl --fail --location --retry 2 "https://codeload.github.com/openclaw/openclaw/tar.gz/$PROOF_REVISION" -o candidate.tar.gz
+          sha256sum candidate.tar.gz > results/source-archive.sha256
+          tar -xzf candidate.tar.gz --strip-components=1 -C candidate
+          cp proof/pr-131462/heartbeat-proof.e2e.test.ts candidate/test/e2e/qa-lab/runtime/pr131462-heartbeat-proof.e2e.test.ts
+          printf '%s\n' "$PROOF_REVISION" > results/revision.txt
+          sha256sum proof/pr-131462/heartbeat-proof.e2e.test.ts > results/fixture.sha256
+          chmod -R a+rwX candidate results
+      - name: Run in a container without host credentials
+        env:
+          PROOF_VARIANT: ${{ matrix.variant }}
+          PROOF_REVISION: ${{ matrix.revision }}
+        run: |
+          set -euo pipefail
+          docker run --rm --cap-drop=ALL --security-opt=no-new-privileges \
+            --pids-limit=2048 \
+            -v "$PWD/candidate:/candidate" \
+            -v "$PWD/results:/results" \
+            -v "$PWD/proof/pr-131462:/proof:ro" \
+            -e "PROOF_VARIANT=$PROOF_VARIANT" \
+            -e "PROOF_REVISION=$PROOF_REVISION" \
+            -w /candidate node:24.15.0 bash /proof/run-proof.sh
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: heartbeat-proof-${{ matrix.variant }}
+          path: results/
+          if-no-files-found: error
+          retention-days: 7
