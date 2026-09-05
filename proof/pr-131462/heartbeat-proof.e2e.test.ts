@@ -121,6 +121,8 @@ describe("PR131462 real cron quiet-heartbeat boundary", () => {
         const provider = buildMockOpenAiResponsesProvider(`http://127.0.0.1:${address.port}/v1`, "proof-heartbeat-model");
         const cfg = {
           agents: { defaults: { workspace: workspaceDir, skipBootstrap: true, heartbeat: { every: "24h", session: "cron:proof:run:transient", isolatedSession: true, target: "none" }, model: { primary: provider.modelRef }, models: { [provider.modelRef]: { params: { transport: "sse", openaiWsWarmup: false } } } }, entries: { main: { default: true } } },
+          // Direct main cron wakes resolve session.mainKey before heartbeat.session.
+          session: { mainKey: "cron:proof:run:transient" },
           messages: { visibleReplies: "message_tool" },
           models: { mode: "replace", providers: { [provider.providerId]: provider.config } },
           gateway: { auth: { mode: "token", token: "pr131462-test-token" } },
