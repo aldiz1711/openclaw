@@ -164,7 +164,6 @@ describe("PR131462 real cron quiet-heartbeat boundary", () => {
         const claim1 = claimHeartbeatOutcomeForRun({ agentId: "main", sessionKey: baseKey, runId: "proof-reader-1" });
         const retry = claimHeartbeatOutcomeForRun({ agentId: "main", sessionKey: baseKey, runId: "proof-reader-1" });
         const claim2 = claimHeartbeatOutcomeForRun({ agentId: "main", sessionKey: baseKey, runId: "proof-reader-2" });
-        process.stdout.write(`HEARTBEAT_PROOF ${JSON.stringify({ case: seeded ? "durable" : "transient", status: terminal?.status, error: terminal?.error, terminal, baseKey, childKey, observedSessionKeys: db.prepare("SELECT session_key FROM session_nodes ORDER BY session_key").all(), ownerExists: Boolean(owner), childExists: Boolean(child), nodeCount, outcomeCount, toolExecuted, claimPreserved: seeded ? Boolean(claim1 && retry && JSON.stringify(claim1) === JSON.stringify(retry) && !claim2) : !claim1 && !retry && !claim2, toolCallsSent, toolAccepted, transcriptAccepted, transcriptTool, requestCount, protocolErrors, claimBehavior: { first: Boolean(claim1), retry: Boolean(retry), otherRun: Boolean(claim2) } })}\n`);
         expect(protocolErrors).toEqual([]);
         expect(toolCallsSent).toBe(1);
         expect(toolExecuted).toBe(true);
@@ -182,6 +181,8 @@ describe("PR131462 real cron quiet-heartbeat boundary", () => {
           expect(retry).toBeUndefined();
         }
         expect(claim2).toBeUndefined();
+        // Emit only after every tool, owner, outcome, and claim assertion has passed.
+        process.stdout.write(`HEARTBEAT_PROOF ${JSON.stringify({ case: seeded ? "durable" : "transient", status: terminal?.status, error: terminal?.error, terminal, baseKey, childKey, observedSessionKeys: db.prepare("SELECT session_key FROM session_nodes ORDER BY session_key").all(), ownerExists: Boolean(owner), childExists: Boolean(child), nodeCount, outcomeCount, toolExecuted, claimPreserved: seeded ? Boolean(claim1 && retry && JSON.stringify(claim1) === JSON.stringify(retry) && !claim2) : !claim1 && !retry && !claim2, toolCallsSent, toolAccepted, transcriptAccepted, transcriptTool, requestCount, protocolErrors, claimBehavior: { first: Boolean(claim1), retry: Boolean(retry), otherRun: Boolean(claim2) } })}\n`);
         expect(terminal).toMatchObject({ runId: run.runId, status: "ok" });
         expect(terminal?.error).toBeUndefined();
       } finally {
