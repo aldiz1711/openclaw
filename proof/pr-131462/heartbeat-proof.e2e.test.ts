@@ -21,7 +21,7 @@ import { resetTaskRegistryForTests } from "../../../../src/tasks/task-runtime.te
 import { captureEnv, deleteTestEnvValue, setTestEnvValue } from "../../../../src/test-utils/env.js";
 import { useAutoCleanupTempDirTracker } from "../../../helpers/temp-dir.js";
 
-const envKeys = ["HOME", "OPENCLAW_STATE_DIR", "OPENCLAW_CONFIG_PATH", "OPENCLAW_GATEWAY_TOKEN", "OPENCLAW_TEST_GATEWAY_OVERRIDE_TOKEN", "OPENCLAW_TEST_RUNTIME_OVERRIDE_TOKEN", "OPENCLAW_TEST_MINIMAL_GATEWAY", "OPENCLAW_SKIP_CHANNELS", "OPENCLAW_SKIP_GMAIL_WATCHER", "OPENCLAW_SKIP_CRON", "OPENCLAW_SKIP_CANVAS_HOST", "OPENCLAW_SKIP_BROWSER_CONTROL_SERVER", "OPENCLAW_SKIP_PROVIDERS", "OPENCLAW_BUNDLED_PLUGINS_DIR", "OPENCLAW_DISABLE_BUNDLED_PLUGINS"];
+const envKeys = ["OPENCLAW_TEST_FAST", "HOME", "OPENCLAW_STATE_DIR", "OPENCLAW_CONFIG_PATH", "OPENCLAW_GATEWAY_TOKEN", "OPENCLAW_TEST_GATEWAY_OVERRIDE_TOKEN", "OPENCLAW_TEST_RUNTIME_OVERRIDE_TOKEN", "OPENCLAW_TEST_MINIMAL_GATEWAY", "OPENCLAW_SKIP_CHANNELS", "OPENCLAW_SKIP_GMAIL_WATCHER", "OPENCLAW_SKIP_CRON", "OPENCLAW_SKIP_CANVAS_HOST", "OPENCLAW_SKIP_BROWSER_CONTROL_SERVER", "OPENCLAW_SKIP_PROVIDERS", "OPENCLAW_BUNDLED_PLUGINS_DIR", "OPENCLAW_DISABLE_BUNDLED_PLUGINS"];
 const tempDirs = useAutoCleanupTempDirTracker(afterEach);
 const baseKey = "agent:main:cron:proof:run:transient";
 const childKey = `${baseKey}:heartbeat`;
@@ -111,7 +111,8 @@ describe("PR131462 real cron quiet-heartbeat boundary", () => {
       try {
         await Promise.all([fs.mkdir(workspaceDir, { recursive: true }), fs.mkdir(bundledDir, { recursive: true }), fs.mkdir(stateDir, { recursive: true })]);
         await fs.writeFile(path.join(workspaceDir, "HEARTBEAT.md"), "Report quiet progress using heartbeat_respond.\n");
-        for (const [key, value] of Object.entries({ HOME: tempHome, OPENCLAW_STATE_DIR: stateDir, OPENCLAW_GATEWAY_TOKEN: "pr131462-test-token", OPENCLAW_SKIP_CHANNELS: "1", OPENCLAW_SKIP_GMAIL_WATCHER: "1", OPENCLAW_SKIP_CRON: "0", OPENCLAW_SKIP_CANVAS_HOST: "1", OPENCLAW_SKIP_BROWSER_CONTROL_SERVER: "1", OPENCLAW_SKIP_PROVIDERS: "1", OPENCLAW_BUNDLED_PLUGINS_DIR: bundledDir, OPENCLAW_DISABLE_BUNDLED_PLUGINS: "1" })) setTestEnvValue(key, value);
+        // test/test-env.ts enables fast shortcuts globally; this Gateway proof needs the real runtime.
+        for (const [key, value] of Object.entries({ OPENCLAW_TEST_FAST: "0", HOME: tempHome, OPENCLAW_STATE_DIR: stateDir, OPENCLAW_GATEWAY_TOKEN: "pr131462-test-token", OPENCLAW_SKIP_CHANNELS: "1", OPENCLAW_SKIP_GMAIL_WATCHER: "1", OPENCLAW_SKIP_CRON: "0", OPENCLAW_SKIP_CANVAS_HOST: "1", OPENCLAW_SKIP_BROWSER_CONTROL_SERVER: "1", OPENCLAW_SKIP_PROVIDERS: "1", OPENCLAW_BUNDLED_PLUGINS_DIR: bundledDir, OPENCLAW_DISABLE_BUNDLED_PLUGINS: "1" })) setTestEnvValue(key, value);
         deleteTestEnvValue("OPENCLAW_CONFIG_PATH");
         deleteTestEnvValue("OPENCLAW_TEST_MINIMAL_GATEWAY");
         await new Promise<void>((resolve, reject) => { providerServer.once("error", reject); providerServer.listen(0, "127.0.0.1", resolve); });
