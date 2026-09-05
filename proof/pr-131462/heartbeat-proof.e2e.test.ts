@@ -7,7 +7,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { clearConfigCache, clearRuntimeConfigSnapshot } from "../../../../src/config/config.js";
 import { resetConfigOverrides } from "../../../../src/config/runtime-overrides.js";
-import { loadSessionEntry, replaceSessionEntry } from "../../../../src/config/sessions/session-accessor.js";
+import { isSessionTranscriptProjectionUnavailableError, loadSessionEntry, replaceSessionEntry, waitForSessionTranscriptProjection } from "../../../../src/config/sessions/session-accessor.js";
 import { clearSessionStoreCacheForTest } from "../../../../src/config/sessions/store-writer-state.js";
 import type { OpenClawConfig } from "../../../../src/config/types.openclaw.js";
 import { readSessionMessagesAsync } from "../../../../src/gateway/session-transcript-readers.js";
@@ -144,7 +144,20 @@ describe("PR131462 real cron quiet-heartbeat boundary", () => {
         const db = openOpenClawAgentDatabase({ agentId: "main" }).db;
         const outcomeCount = Number(db.prepare("SELECT COUNT(*) AS n FROM heartbeat_outcomes WHERE session_key = ?").get(baseKey)?.n ?? 0);
         const nodeCount = Number(db.prepare("SELECT COUNT(*) AS n FROM session_nodes WHERE session_key = ?").get(baseKey)?.n ?? 0);
-        const transcript = child?.sessionId ? await readSessionMessagesAsync({ agentId: "main", sessionEntry: child, sessionId: child.sessionId, sessionKey: childKey }, { mode: "full", reason: "PR131462 boundary proof" }) : [];
+        let transcript: unknown[] = [];
+        if (child?.sessionId) {
+          const scope = { agentId: "main", sessionEntry: child, sessionId: child.sessionId, sessionKey: childKey };
+          const read = () => readSessionMessagesAsync(scope, { mode: "full", reason: "PR131462 boundary proof" });
+          try {
+            transcript = await read();
+          } catch (error) {
+            if (!isSessionTranscriptProjectionUnavailableError(error)) throw error;
+            // The reader schedules a deferred rebuild, as in readSessionMessageCountAsync.
+            // Cron completion settles writes; the display projection may still need this wait.
+            await waitForSessionTranscriptProjection(scope);
+            transcript = await read();
+          }
+        }
         const transcriptTool = JSON.stringify(transcript).includes("heartbeat_respond");
         const transcriptAccepted = containsAcceptedResponse(transcript);
         const toolExecuted = transcriptTool && (toolAccepted || transcriptAccepted);
