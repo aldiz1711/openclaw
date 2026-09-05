@@ -23,7 +23,8 @@ import { useAutoCleanupTempDirTracker } from "../../../helpers/temp-dir.js";
 
 const envKeys = ["OPENCLAW_TEST_FAST", "HOME", "OPENCLAW_STATE_DIR", "OPENCLAW_CONFIG_PATH", "OPENCLAW_GATEWAY_TOKEN", "OPENCLAW_TEST_GATEWAY_OVERRIDE_TOKEN", "OPENCLAW_TEST_RUNTIME_OVERRIDE_TOKEN", "OPENCLAW_TEST_MINIMAL_GATEWAY", "OPENCLAW_SKIP_CHANNELS", "OPENCLAW_SKIP_GMAIL_WATCHER", "OPENCLAW_SKIP_CRON", "OPENCLAW_SKIP_CANVAS_HOST", "OPENCLAW_SKIP_BROWSER_CONTROL_SERVER", "OPENCLAW_SKIP_PROVIDERS", "OPENCLAW_BUNDLED_PLUGINS_DIR", "OPENCLAW_DISABLE_BUNDLED_PLUGINS"];
 const tempDirs = useAutoCleanupTempDirTracker(afterEach);
-const baseKey = "agent:main:cron:proof:run:transient";
+// Direct main cron wakes force the canonical main owner before heartbeat session selection.
+const baseKey = "agent:main:main";
 const childKey = `${baseKey}:heartbeat`;
 const summary = "PR131462 quiet progress recorded by the real heartbeat tool";
 
@@ -120,9 +121,7 @@ describe("PR131462 real cron quiet-heartbeat boundary", () => {
         if (!address || typeof address === "string") throw new Error("provider did not bind");
         const provider = buildMockOpenAiResponsesProvider(`http://127.0.0.1:${address.port}/v1`, "proof-heartbeat-model");
         const cfg = {
-          agents: { defaults: { workspace: workspaceDir, skipBootstrap: true, heartbeat: { every: "24h", session: "cron:proof:run:transient", isolatedSession: true, target: "none" }, model: { primary: provider.modelRef }, models: { [provider.modelRef]: { params: { transport: "sse", openaiWsWarmup: false } } } }, entries: { main: { default: true } } },
-          // Direct main cron wakes resolve session.mainKey before heartbeat.session.
-          session: { mainKey: "cron:proof:run:transient" },
+          agents: { defaults: { workspace: workspaceDir, skipBootstrap: true, heartbeat: { every: "24h", isolatedSession: true, target: "none" }, model: { primary: provider.modelRef }, models: { [provider.modelRef]: { params: { transport: "sse", openaiWsWarmup: false } } } }, entries: { main: { default: true } } },
           messages: { visibleReplies: "message_tool" },
           models: { mode: "replace", providers: { [provider.providerId]: provider.config } },
           gateway: { auth: { mode: "token", token: "pr131462-test-token" } },
@@ -152,7 +151,7 @@ describe("PR131462 real cron quiet-heartbeat boundary", () => {
         const claim1 = claimHeartbeatOutcomeForRun({ agentId: "main", sessionKey: baseKey, runId: "proof-reader-1" });
         const retry = claimHeartbeatOutcomeForRun({ agentId: "main", sessionKey: baseKey, runId: "proof-reader-1" });
         const claim2 = claimHeartbeatOutcomeForRun({ agentId: "main", sessionKey: baseKey, runId: "proof-reader-2" });
-        process.stdout.write(`HEARTBEAT_PROOF ${JSON.stringify({ case: seeded ? "durable" : "transient", status: terminal?.status, error: terminal?.error, terminal, ownerExists: Boolean(owner), childExists: Boolean(child), nodeCount, outcomeCount, toolExecuted, claimPreserved: seeded ? Boolean(claim1 && retry && JSON.stringify(claim1) === JSON.stringify(retry) && !claim2) : !claim1 && !retry && !claim2, toolCallsSent, toolAccepted, transcriptAccepted, transcriptTool, requestCount, protocolErrors, claimBehavior: { first: Boolean(claim1), retry: Boolean(retry), otherRun: Boolean(claim2) } })}\n`);
+        process.stdout.write(`HEARTBEAT_PROOF ${JSON.stringify({ case: seeded ? "durable" : "transient", status: terminal?.status, error: terminal?.error, terminal, baseKey, childKey, observedSessionKeys: db.prepare("SELECT session_key FROM session_nodes ORDER BY session_key").all(), ownerExists: Boolean(owner), childExists: Boolean(child), nodeCount, outcomeCount, toolExecuted, claimPreserved: seeded ? Boolean(claim1 && retry && JSON.stringify(claim1) === JSON.stringify(retry) && !claim2) : !claim1 && !retry && !claim2, toolCallsSent, toolAccepted, transcriptAccepted, transcriptTool, requestCount, protocolErrors, claimBehavior: { first: Boolean(claim1), retry: Boolean(retry), otherRun: Boolean(claim2) } })}\n`);
         expect(protocolErrors).toEqual([]);
         expect(toolCallsSent).toBe(1);
         expect(toolExecuted).toBe(true);
