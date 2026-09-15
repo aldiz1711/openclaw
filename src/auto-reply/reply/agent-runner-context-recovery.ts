@@ -22,9 +22,10 @@ function buildPreservedSessionRecoveryPrefix(params: {
     ? `openclaw sessions compact "${key}" --agent ${agent} --max-lines 200`
     : `openclaw sessions compact "${key}" --max-lines 200`;
   return (
-    "⚠️ Auto-compaction could not recover this turn. I kept this conversation mapped to the current session, " +
-    "so /compact and /new cannot help here. " +
-    `Recover with \`${compactCommand}\`, or switch this agent to a model with a larger context window.`
+    "⚠️ Auto-compaction could not recover this turn. I kept this conversation mapped to the current session. " +
+    "An operator can still reclaim it by trimming the transcript, but trimming permanently deletes older " +
+    "history and keeps no backup. Back up first with `openclaw backup create` if that history matters, then run " +
+    `\`${compactCommand}\`. A model with a larger context window may avoid the trim entirely.`
   );
 }
 

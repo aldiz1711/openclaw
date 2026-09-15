@@ -28,7 +28,7 @@ describe("buildContextOverflowRecoveryText", () => {
     expect(text).not.toContain("heartbeat model bleed");
   });
 
-  it("points preserved sessions at mechanical compaction instead of /compact or /new", () => {
+  it("warns about deletion before recommending mechanical compaction", () => {
     const text = buildContextOverflowRecoveryText({
       duringCompaction: true,
       preserveSessionMapping: true,
@@ -44,8 +44,14 @@ describe("buildContextOverflowRecoveryText", () => {
     expect(text).not.toContain("use /compact");
     expect(text).not.toContain("use /new");
     expect(text).not.toContain("fresh session");
+    expect(text).not.toContain("cannot help here");
+    expect(text).toContain("permanently deletes older history and keeps no backup");
+    expect(text).toContain("openclaw backup create");
     expect(text).toContain(
       'openclaw sessions compact "agent:main:main" --agent main --max-lines 200',
+    );
+    expect(text.indexOf("permanently deletes")).toBeLessThan(
+      text.indexOf("openclaw sessions compact"),
     );
   });
 
@@ -60,7 +66,13 @@ describe("buildContextOverflowRecoveryText", () => {
     expect(text).not.toContain("use /compact");
     expect(text).not.toContain("use /new");
     expect(text).not.toContain("fresh session");
+    expect(text).not.toContain("cannot help here");
+    expect(text).toContain("permanently deletes older history and keeps no backup");
+    expect(text).toContain("openclaw backup create");
     expect(text).toContain('openclaw sessions compact "<session-key>" --max-lines 200');
+    expect(text.indexOf("permanently deletes")).toBeLessThan(
+      text.indexOf("openclaw sessions compact"),
+    );
   });
 
   it("does not use stale heartbeat hints for a different explicit runtime model", () => {

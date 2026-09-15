@@ -6572,6 +6572,8 @@ describe("runReplyAgent typing (heartbeat)", () => {
     expect(payload.text).not.toContain("use /compact");
     expect(payload.text).not.toContain("use /new");
     expect(payload.text).not.toContain("fresh session");
+    expect(payload.text).not.toContain("cannot help here");
+    expect(payload.text).toContain("permanently deletes older history and keeps no backup");
     expect(payload.text).toContain("openclaw sessions compact");
   });
 
@@ -6597,6 +6599,8 @@ describe("runReplyAgent typing (heartbeat)", () => {
     expect(payload.text).not.toContain("use /compact");
     expect(payload.text).not.toContain("use /new");
     expect(payload.text).not.toContain("fresh session");
+    expect(payload.text).not.toContain("cannot help here");
+    expect(payload.text).toContain("permanently deletes older history and keeps no backup");
     expect(payload.text).toContain("openclaw sessions compact");
   });
 
