@@ -6569,8 +6569,10 @@ describe("runReplyAgent typing (heartbeat)", () => {
       throw new Error("expected payload");
     }
     expect(payload.text).toContain("Auto-compaction could not recover this turn");
-    expect(payload.text).toContain("fresh session or using a model with a larger context window");
-    expect(payload.text).toContain("/new");
+    expect(payload.text).not.toContain("use /compact");
+    expect(payload.text).not.toContain("use /new");
+    expect(payload.text).not.toContain("fresh session");
+    expect(payload.text).toContain("openclaw sessions compact");
   });
 
   it("surfaces overflow fallback when embedded payload text is whitespace-only", async () => {
@@ -6592,8 +6594,10 @@ describe("runReplyAgent typing (heartbeat)", () => {
       throw new Error("expected payload");
     }
     expect(payload.text).toContain("Auto-compaction could not recover this turn");
-    expect(payload.text).toContain("fresh session or using a model with a larger context window");
-    expect(payload.text).toContain("/new");
+    expect(payload.text).not.toContain("use /compact");
+    expect(payload.text).not.toContain("use /new");
+    expect(payload.text).not.toContain("fresh session");
+    expect(payload.text).toContain("openclaw sessions compact");
   });
 
   it("returns friendly message for role ordering errors thrown as exceptions", async () => {
