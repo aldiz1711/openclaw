@@ -12,6 +12,12 @@ function buildContextOverflowResetHint(): string {
   return "\n\nTry starting a fresh session or using a model with a larger context window.";
 }
 
+function quoteShellArg(value: string): string {
+  const escaped =
+    process.platform === "win32" ? value.replaceAll("'", "''") : value.replaceAll("'", "'\\''");
+  return `'${escaped}'`;
+}
+
 function buildPreservedSessionRecoveryPrefix(params: {
   sessionKey?: string;
   agentId?: string;
@@ -19,8 +25,8 @@ function buildPreservedSessionRecoveryPrefix(params: {
   const key = normalizeOptionalString(params.sessionKey) ?? "<session-key>";
   const agent = normalizeOptionalString(params.agentId);
   const compactCommand = agent
-    ? `openclaw sessions compact "${key}" --agent ${agent} --max-lines 200`
-    : `openclaw sessions compact "${key}" --max-lines 200`;
+    ? `openclaw sessions compact ${quoteShellArg(key)} --agent ${quoteShellArg(agent)} --max-lines 200`
+    : `openclaw sessions compact ${quoteShellArg(key)} --max-lines 200`;
   return (
     "⚠️ Auto-compaction could not recover this turn. I kept this conversation mapped to the current session. " +
     "An operator can still reclaim it by trimming the transcript, but trimming permanently deletes older " +

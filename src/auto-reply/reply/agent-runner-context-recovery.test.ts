@@ -48,11 +48,24 @@ describe("buildContextOverflowRecoveryText", () => {
     expect(text).toContain("permanently deletes older history and keeps no backup");
     expect(text).toContain("openclaw backup create");
     expect(text).toContain(
-      'openclaw sessions compact "agent:main:main" --agent main --max-lines 200',
+      "openclaw sessions compact 'agent:main:main' --agent 'main' --max-lines 200",
     );
     expect(text.indexOf("permanently deletes")).toBeLessThan(
       text.indexOf("openclaw sessions compact"),
     );
+  });
+
+  it("quotes Matrix thread keys so dollar segments survive shell expansion", () => {
+    const key = "agent:main:matrix:channel:!ops:example.org:thread:$RootEvent:Example.Org";
+    const text = buildContextOverflowRecoveryText({
+      preserveSessionMapping: true,
+      sessionKey: key,
+      agentId: "main",
+      cfg: {},
+    });
+
+    expect(text).toContain(`openclaw sessions compact '${key}' --agent 'main' --max-lines 200`);
+    expect(text).not.toContain(`"${key}"`);
   });
 
   it("falls back to a placeholder compact command when the session key is unknown", () => {
@@ -69,7 +82,7 @@ describe("buildContextOverflowRecoveryText", () => {
     expect(text).not.toContain("cannot help here");
     expect(text).toContain("permanently deletes older history and keeps no backup");
     expect(text).toContain("openclaw backup create");
-    expect(text).toContain('openclaw sessions compact "<session-key>" --max-lines 200');
+    expect(text).toContain("openclaw sessions compact '<session-key>' --max-lines 200");
     expect(text.indexOf("permanently deletes")).toBeLessThan(
       text.indexOf("openclaw sessions compact"),
     );
