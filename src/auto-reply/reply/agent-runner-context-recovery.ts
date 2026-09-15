@@ -12,6 +12,22 @@ function buildContextOverflowResetHint(): string {
   return "\n\nTry starting a fresh session or using a model with a larger context window.";
 }
 
+function buildPreservedSessionRecoveryPrefix(params: {
+  sessionKey?: string;
+  agentId?: string;
+}): string {
+  const key = normalizeOptionalString(params.sessionKey) ?? "<session-key>";
+  const agent = normalizeOptionalString(params.agentId);
+  const compactCommand = agent
+    ? `openclaw sessions compact "${key}" --agent ${agent} --max-lines 200`
+    : `openclaw sessions compact "${key}" --max-lines 200`;
+  return (
+    "⚠️ Auto-compaction could not recover this turn. I kept this conversation mapped to the current session, " +
+    "so /compact and /new cannot help here. " +
+    `Recover with \`${compactCommand}\`, or switch this agent to a model with a larger context window.`
+  );
+}
+
 type ModelRefLike = {
   provider: string;
   model: string;
@@ -152,6 +168,7 @@ function resolveHeartbeatBleedHint(params: {
 export function buildContextOverflowRecoveryText(params: {
   duringCompaction?: boolean;
   preserveSessionMapping?: boolean;
+  sessionKey?: string;
   cfg: FollowupRun["run"]["config"];
   agentId?: string;
   primaryProvider?: string;
@@ -161,7 +178,10 @@ export function buildContextOverflowRecoveryText(params: {
   activeSessionEntry?: SessionEntry;
 }): string {
   const prefix = params.preserveSessionMapping
-    ? "⚠️ Auto-compaction could not recover this turn. I kept this conversation mapped to the current session. Please try again, use /compact, or use /new to start a fresh session."
+    ? buildPreservedSessionRecoveryPrefix({
+        sessionKey: params.sessionKey,
+        agentId: params.agentId,
+      })
     : params.duringCompaction
       ? "⚠️ Context limit exceeded during compaction. I've reset our conversation to start fresh - please try again."
       : "⚠️ Context limit exceeded. I've reset our conversation to start fresh - please try again.";
@@ -179,5 +199,8 @@ export function buildContextOverflowRecoveryText(params: {
         activeSessionEntry: params.activeSessionEntry,
       })
     : undefined;
-  return prefix + (heartbeatBleedHint ?? buildContextOverflowResetHint());
+  return (
+    prefix +
+    (heartbeatBleedHint ?? (params.preserveSessionMapping ? "" : buildContextOverflowResetHint()))
+  );
 }
