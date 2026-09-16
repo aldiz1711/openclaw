@@ -1,3 +1,4 @@
+import { findNormalizedProviderValue } from "@openclaw/model-catalog-core/provider-id";
 // Litellm plugin entrypoint registers its OpenClaw integration.
 import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
 import {
@@ -8,9 +9,10 @@ import {
 import { normalizeOptionalSecretInput } from "openclaw/plugin-sdk/provider-auth";
 import { buildOpenAICompatibleProviderCatalog } from "openclaw/plugin-sdk/provider-catalog-live-runtime";
 import { createProviderApiKeyAuthMethod } from "openclaw/plugin-sdk/provider-entry";
+import { normalizeOptionalString } from "openclaw/plugin-sdk/string-coerce-runtime";
 import { buildLitellmImageGenerationProvider } from "./image-generation-provider.js";
-import { applyLitellmConfig, LITELLM_DEFAULT_MODEL_REF } from "./onboard.js";
-import { buildLitellmProvider } from "./provider-catalog.js";
+import { applyLitellmConfig, LITELLM_BASE_URL, LITELLM_DEFAULT_MODEL_REF } from "./onboard.js";
+import { buildLitellmModelDiscovery, buildLitellmProvider } from "./provider-catalog.js";
 
 const PROVIDER_ID = "litellm";
 
@@ -93,15 +95,19 @@ export default definePluginEntry({
       ],
       catalog: {
         order: "simple",
-        run: (ctx) =>
-          buildOpenAICompatibleProviderCatalog({
+        run: (ctx) => {
+          const explicitBaseUrl = normalizeOptionalString(
+            findNormalizedProviderValue(ctx.config.models?.providers, PROVIDER_ID)?.baseUrl,
+          );
+          return buildOpenAICompatibleProviderCatalog({
             discoveryMode: "strict",
             ctx,
             providerId: PROVIDER_ID,
             buildProvider: buildLitellmProvider,
             allowExplicitBaseUrl: true,
-            modelDiscovery: { endpointPath: "v1/models" },
-          }),
+            modelDiscovery: buildLitellmModelDiscovery(explicitBaseUrl ?? LITELLM_BASE_URL),
+          });
+        },
       },
       staticCatalog: {
         order: "simple",
