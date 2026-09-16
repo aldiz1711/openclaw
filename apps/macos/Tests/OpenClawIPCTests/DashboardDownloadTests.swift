@@ -73,10 +73,21 @@ final class DashboardDownloadTests: XCTestCase {
         invalidResponse: Bool = false,
         body: @MainActor (DashboardWindowController, NSWindow, URL) async throws -> Void) async throws
     {
+        try await self.runDownloadFixture(source: source, invalidResponse: invalidResponse, body: body)
+        let deadline = ContinuousClock.now + .seconds(10)
+        while NSApplication.shared.isActive, ContinuousClock.now < deadline {
+            NSApplication.shared.deactivate()
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        XCTAssertFalse(NSApplication.shared.isActive, "The download fixture must leave the app inactive.")
+    }
+
+    private func runDownloadFixture(
+        source: Source = .http,
+        invalidResponse: Bool = false,
+        body: @MainActor (DashboardWindowController, NSWindow, URL) async throws -> Void) async throws
+    {
         _ = AppKitTestSupport.application
-        // TEMP-DIAG: snapshot inherited AppKit state. Revert after diagnosis.
-        print(
-            "TEMP-DIAG Dashboard enter: appActive=\(NSApplication.shared.isActive) windows=\(NSApplication.shared.windows.count) key=\(String(describing: NSApplication.shared.keyWindow))")
         let payload = "attachment download fixture"
         let filename = "attachment.docx"
         let server = try await DashboardHTTPFixture.start(
@@ -100,10 +111,13 @@ final class DashboardDownloadTests: XCTestCase {
                 ].joined(separator: "\r\n")
             })
         defer { server.stop() }
-        // TEMP-DIAG: runs after window.close/closeDashboard defers (LIFO). Revert after diagnosis.
+        // Serial suites share one app. A late download callback can activate
+        // it after close; later suites require an inactive app. Quiesce loudly
+        // instead of leaking the failure into them.
         defer {
-            print(
-                "TEMP-DIAG Dashboard exit: appActive=\(NSApplication.shared.isActive) windows=\(NSApplication.shared.windows.count) key=\(String(describing: NSApplication.shared.keyWindow))")
+            for window in NSApplication.shared.windows {
+                window.close()
+            }
         }
         let dashboardURL = server.url("/control/")
         let controller = DashboardWindowController(
