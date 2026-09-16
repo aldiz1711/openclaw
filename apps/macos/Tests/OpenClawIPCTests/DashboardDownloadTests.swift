@@ -68,11 +68,31 @@ final class DashboardDownloadTests: XCTestCase {
         }
     }
 
+    // TEMP-DIAG: process-wide activation spy. Names whatever activates the app
+    // between the download fixtures and Quick Chat. Revert after diagnosis.
+    private static let activationSpy: Void = {
+        NotificationCenter.default.addObserver(
+            forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main)
+        { _ in
+            let app = NSApplication.shared
+            let kinds = app.windows.map { String(describing: type(of: $0)) }
+            print(
+                "TEMP-DIAG ACTIVATED key=\(String(describing: app.keyWindow)) main=\(String(describing: app.mainWindow)) windows=\(kinds)")
+        }
+        NotificationCenter.default.addObserver(
+            forName: NSWindow.didBecomeKeyNotification, object: nil, queue: .main)
+        { note in
+            print("TEMP-DIAG KEY window=\(String(describing: note.object))")
+        }
+        return ()
+    }()
+
     private func withDownload(
         source: Source = .http,
         invalidResponse: Bool = false,
         body: @MainActor (DashboardWindowController, NSWindow, URL) async throws -> Void) async throws
     {
+        _ = Self.activationSpy
         try await self.runDownloadFixture(source: source, invalidResponse: invalidResponse, body: body)
         let deadline = ContinuousClock.now + .seconds(10)
         while NSApplication.shared.isActive, ContinuousClock.now < deadline {
