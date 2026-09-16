@@ -100,6 +100,10 @@ final class DashboardDownloadTests: XCTestCase {
             try await Task.sleep(for: .milliseconds(50))
         }
         XCTAssertFalse(NSApplication.shared.isActive, "The download fixture must leave the app inactive.")
+        // TEMP-DIAG3: re-sync check. If deactivation is dropped by the runner,
+        // isActive flips back without any didBecomeActive post. Revert after diagnosis.
+        try await Task.sleep(for: .seconds(2))
+        print("TEMP-DIAG3 teardown resync isActive=\(NSApplication.shared.isActive)")
     }
 
     private func runDownloadFixture(

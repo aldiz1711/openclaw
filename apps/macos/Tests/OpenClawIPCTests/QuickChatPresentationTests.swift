@@ -32,6 +32,8 @@ final class QuickChatPresentationTests: XCTestCase {
         defer { controller.stop() }
         controller.start()
         controller.setEnabled(true)
+        // TEMP-DIAG3: capture pre-deactivate state. Revert after diagnosis.
+        print("TEMP-DIAG3 QuickChat start isActive=\(application.isActive)")
         application.deactivate()
         try await self.waitUntil("deactivate") { !application.isActive }
         try XCTUnwrap(shortcut)()
