@@ -145,7 +145,7 @@ final class DashboardWindowController: NSWindowController, WKNavigationDelegate,
     private var reconnectTask: (id: UUID, task: Task<Void, Never>)?
     private var signInProgress: GatewayBrowserSignInProgress?
     private var navigationGeneration: UInt64 = 0
-    private lazy var downloads = DashboardDownloads(controller: self)
+    lazy var downloads = DashboardDownloads(controller: self)
     private var loadGeneration: UInt64 = 0
     private var pendingLoad: Task<Void, Never>?
     private var pendingNativeCommands: [DashboardNativeCommand] = []
@@ -1590,18 +1590,6 @@ extension DashboardWindowController {
         } else if webView === self.webView {
             self.nativeCommandsReady = false
         }
-    }
-
-    func webView(
-        _ webView: WKWebView,
-        navigationAction: WKNavigationAction,
-        didBecome download: WKDownload)
-    {
-        guard webView === self.webView else {
-            download.cancel { _ in }
-            return
-        }
-        self.downloads.start(download, for: navigationAction)
     }
 
     /// The displayed document is replaced at commit, not at provisional start.

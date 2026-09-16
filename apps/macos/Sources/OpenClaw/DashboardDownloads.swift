@@ -240,3 +240,17 @@ final class DashboardDownloads: NSObject, WKDownloadDelegate {
         }
     }
 }
+
+extension DashboardWindowController {
+    func webView(
+        _ webView: WKWebView,
+        navigationAction: WKNavigationAction,
+        didBecome download: WKDownload)
+    {
+        guard webView === self.webView else {
+            download.cancel { _ in }
+            return
+        }
+        self.downloads.start(download, for: navigationAction)
+    }
+}
