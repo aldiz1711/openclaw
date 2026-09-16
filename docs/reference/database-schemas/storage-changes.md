@@ -91,8 +91,16 @@ Discord presence cooldown reads, claims, and conditional rollback use the shared
 state worker. The listener rechecks current policy and Gateway generation after
 storage waits, queues greetings only after a durable claim, and joins admitted
 work and rollback during provider shutdown, including work detached by reconnect.
-The same namespace, eight-hour expiry, and capacity policy remain in use. Thread
-binding persistence retains its synchronous owner and public completion contract.
+The same namespace, eight-hour expiry, and capacity policy remain in use. Discord
+thread binding restoration at channel-manager creation, provider startup, and
+registered subagent hooks uses the shared state worker. Concurrent cold reads share
+one load; a synchronous compatibility caller that initializes or mutates the
+registry while that load is pending keeps its newer state. Provider startup stops
+acquired binding managers when startup is cancelled or reconciliation fails. Snapshot writes and
+public synchronous binding APIs retain their synchronous owner and completion
+contract. Moving those writes requires preserving immediate unbind persistence
+and preventing older writes from recreating removed bindings; row comparison
+tokens alone do not identify an absent binding incarnation.
 
 Memory-host event appends and bounded journal reads execute on the shared state
 worker. The plugin-state owner allocates the sequence, rereads the cursor and
@@ -153,8 +161,10 @@ Session listing loads complete persisted subagent metadata in the shared-state
 worker through a read-only connection. The existing cache coalesces pending fills
 and applies intervening named updates and deletions before publishing its first
 complete snapshot. Full replacement, registry ownership changes, and database
-retirement fence obsolete replies. Its 500 ms freshness policy and retention
-rules remain unchanged. Gateway, embedded, and TUI callers merge accepted rows
+retirement fence obsolete replies. Loaded snapshots stay current through registry
+publication instead of periodic reloads: named writes patch rows, while full
+replacement and restore replace snapshots. Retention rules remain unchanged.
+Gateway, embedded, and TUI callers merge accepted rows
 with current host memory and scheduler facts before building the full topology.
 Pure topology grouping yields through the shared session-list work budget.
 Synchronous readers reuse the same SQL and row decoder; runtime reads do not
