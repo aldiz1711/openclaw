@@ -74,6 +74,9 @@ final class DashboardDownloadTests: XCTestCase {
         body: @MainActor (DashboardWindowController, NSWindow, URL) async throws -> Void) async throws
     {
         _ = AppKitTestSupport.application
+        // TEMP-DIAG: snapshot inherited AppKit state. Revert after diagnosis.
+        print(
+            "TEMP-DIAG Dashboard enter: appActive=\(NSApplication.shared.isActive) windows=\(NSApplication.shared.windows.count) key=\(String(describing: NSApplication.shared.keyWindow))")
         let payload = "attachment download fixture"
         let filename = "attachment.docx"
         let server = try await DashboardHTTPFixture.start(
@@ -97,6 +100,11 @@ final class DashboardDownloadTests: XCTestCase {
                 ].joined(separator: "\r\n")
             })
         defer { server.stop() }
+        // TEMP-DIAG: runs after window.close/closeDashboard defers (LIFO). Revert after diagnosis.
+        defer {
+            print(
+                "TEMP-DIAG Dashboard exit: appActive=\(NSApplication.shared.isActive) windows=\(NSApplication.shared.windows.count) key=\(String(describing: NSApplication.shared.keyWindow))")
+        }
         let dashboardURL = server.url("/control/")
         let controller = DashboardWindowController(
             url: dashboardURL,

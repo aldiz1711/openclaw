@@ -33,16 +33,16 @@ final class QuickChatPresentationTests: XCTestCase {
         controller.start()
         controller.setEnabled(true)
         application.deactivate()
-        try await self.waitUntil { !application.isActive }
+        try await self.waitUntil("deactivate") { !application.isActive }
         try XCTUnwrap(shortcut)()
 
-        try await self.waitUntil { controller.isVisible && !model.isLoadingModelControls }
+        try await self.waitUntil("present") { controller.isVisible && !model.isLoadingModelControls }
         let panel = try XCTUnwrap(application.windows.first {
             ($0.contentView as? NSHostingView<QuickChatView>)?.rootView.model === model
         })
         XCTAssertTrue(panel.isVisible)
         XCTAssertFalse(panel.hidesOnDeactivate)
-        try await self.waitUntil { panel.firstResponder is NSTextView }
+        try await self.waitUntil("firstResponder") { panel.firstResponder is NSTextView }
         XCTAssertTrue(panel.firstResponder is NSTextView)
         print(
             "Quick Chat presented: visible=\(panel.isVisible), active=\(application.isActive), key=\(panel.isKeyWindow), editorReady=\(panel.firstResponder is NSTextView)")
@@ -59,7 +59,7 @@ final class QuickChatPresentationTests: XCTestCase {
 
         controller.dismiss()
         try XCTUnwrap(shortcut)()
-        try await self.waitUntil { controller.isVisible }
+        try await self.waitUntil("reopen") { controller.isVisible }
         XCTAssertTrue(panel.isVisible)
         print("Quick Chat reopened: visible=\(panel.isVisible)")
         controller.setEnabled(false)
@@ -68,11 +68,16 @@ final class QuickChatPresentationTests: XCTestCase {
         print("Quick Chat disabled: visible=\(controller.isVisible), shortcutRegistered=\(shortcut != nil)")
     }
 
-    private func waitUntil(_ condition: () -> Bool) async throws {
+    private func waitUntil(_ label: String, _ condition: () -> Bool) async throws {
+        // TEMP-DIAG: identify which wait times out on the PR branch. Revert after diagnosis.
         let deadline = ContinuousClock.now + .seconds(5)
         while !condition(), ContinuousClock.now < deadline {
             try await Task.sleep(for: .milliseconds(10))
         }
-        XCTAssertTrue(condition())
+        let passed = condition()
+        let app = NSApplication.shared
+        print(
+            "TEMP-DIAG QuickChat wait \(label): \(passed ? "passed" : "TIMED OUT") appActive=\(app.isActive) windows=\(app.windows.count) key=\(String(describing: app.keyWindow))")
+        XCTAssertTrue(passed)
     }
 }
