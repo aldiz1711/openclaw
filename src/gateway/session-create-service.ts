@@ -474,11 +474,7 @@ export async function createGatewaySession(params: {
   const pendingProjectGitUrl = normalizeOptionalString(params.pendingProjectGitUrl);
   const requestedToolOverrides = params.toolOverrides !== undefined;
   const explicitAgentId = params.agentId;
-  const selectedAgent = resolveSessionCreateAgentId(params.cfg, {
-    key: requestedKey,
-    agentId: explicitAgentId,
-    parentSessionKey,
-  });
+  const selectedAgent = resolveSessionCreateAgentId(params.cfg, params);
   if (!selectedAgent.ok) {
     return selectedAgent;
   }

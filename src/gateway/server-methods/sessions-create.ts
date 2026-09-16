@@ -151,11 +151,7 @@ export const sessionCreateHandlers: GatewayRequestHandlers = {
       return;
     }
     const explicitlyRequestedKey = normalizeOptionalString(p.key);
-    const explicitlyRequestedAgent = resolveSessionCreateAgentId(cfg, {
-      key: explicitlyRequestedKey,
-      agentId: p.agentId,
-      parentSessionKey,
-    });
+    const explicitlyRequestedAgent = resolveSessionCreateAgentId(cfg, p);
     if (!explicitlyRequestedAgent.ok) {
       respond(false, undefined, explicitlyRequestedAgent.error);
       return;

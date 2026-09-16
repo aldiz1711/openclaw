@@ -202,6 +202,18 @@ describe("session creation owner selection", () => {
       error: { code: "INVALID_REQUEST", message: 'Unknown agent id "ghost"' },
     });
   });
+
+  it("rejects an explicit blank agent id instead of inferring", () => {
+    expect(
+      resolveSessionCreateAgentId(fleet(), {
+        agentId: "",
+        parentSessionKey: "agent:ops:main",
+      }),
+    ).toMatchObject({
+      ok: false,
+      error: { code: "INVALID_REQUEST", message: 'Unknown agent id ""' },
+    });
+  });
 });
 
 describe("session event agent scope", () => {
