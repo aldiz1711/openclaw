@@ -197,3 +197,18 @@ export function resolveRequestedSessionAgentId(
     error: errorShape(ErrorCodes.INVALID_REQUEST, selectionError.message),
   };
 }
+
+export function resolveSessionCreateAgentId(
+  cfg: OpenClawConfig,
+  selection: { key?: string; agentId?: string; parentSessionKey?: string },
+): RequestedSessionAgentIdResolution {
+  const agentId =
+    selection.agentId ??
+    parseAgentSessionKey(selection.key)?.agentId ??
+    parseAgentSessionKey(selection.parentSessionKey)?.agentId;
+  return resolveRequestedSessionAgentId(
+    cfg,
+    selection.key ?? (agentId === undefined ? "main" : undefined),
+    agentId,
+  );
+}

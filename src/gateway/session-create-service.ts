@@ -120,7 +120,10 @@ import {
   rollbackGatewaySessionPreparation,
 } from "./session-lifecycle-preparation.js";
 import { resolvePluginSessionOwnershipError } from "./session-plugin-ownership.js";
-import { resolveRequestedSessionAgentId } from "./session-request-agent.js";
+import {
+  resolveRequestedSessionAgentId,
+  resolveSessionCreateAgentId,
+} from "./session-request-agent.js";
 import { isSessionVisibilityAllowed, resolveSessionVisibility } from "./session-sharing.js";
 import {
   loadGatewaySessionEntryReadOnly,
@@ -471,12 +474,11 @@ export async function createGatewaySession(params: {
   const pendingProjectGitUrl = normalizeOptionalString(params.pendingProjectGitUrl);
   const requestedToolOverrides = params.toolOverrides !== undefined;
   const explicitAgentId = params.agentId;
-  const explicitKeyAgentId = parseAgentSessionKey(requestedKey)?.agentId;
-  const selectedAgent = resolveRequestedSessionAgentId(
-    params.cfg,
-    requestedKey ?? (explicitAgentId === undefined ? "main" : undefined),
-    explicitAgentId ?? explicitKeyAgentId,
-  );
+  const selectedAgent = resolveSessionCreateAgentId(params.cfg, {
+    key: requestedKey,
+    agentId: explicitAgentId,
+    parentSessionKey,
+  });
   if (!selectedAgent.ok) {
     return selectedAgent;
   }

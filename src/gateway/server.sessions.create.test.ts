@@ -6422,11 +6422,15 @@ test("sessions.create applies configured fixed-store ownership to bare keys", as
 
 test("sessions.create infers the child owner from an agent-prefixed parent", async () => {
   await createSessionStoreDir();
+  const previousSessionConfig = testState.sessionConfig;
   testState.agentsConfig = {
     ownership: "explicit",
     entries: { main: {}, ops: {} },
   };
   testState.agentConfig = {};
+  // A non-main dmScope keeps this parent-only creation on the dashboard-child
+  // path: the main dmScope resets the parent main session in place instead.
+  testState.sessionConfig = { dmScope: "per-channel-peer" };
   const { clearConfigCache, clearRuntimeConfigSnapshot } = await getGatewayConfigModule();
   clearRuntimeConfigSnapshot();
   clearConfigCache();
@@ -6451,6 +6455,7 @@ test("sessions.create infers the child owner from an agent-prefixed parent", asy
   } finally {
     testState.agentsConfig = undefined;
     testState.agentConfig = {};
+    testState.sessionConfig = previousSessionConfig;
   }
 });
 
@@ -7382,7 +7387,6 @@ test("sessions.create forks an active parent from its last completed message", a
 test("sessions.create resolves an agent-qualified fork from the parent store", async () => {
   const { dir } = await createSessionStoreDir();
   const storeTemplate = path.join(dir, "{agentId}", "sessions.json");
-  const mainStorePath = storeTemplate.replace("{agentId}", "main");
   const workStorePath = storeTemplate.replace("{agentId}", "work");
   const workDir = path.dirname(workStorePath);
   testState.sessionStorePath = storeTemplate;
@@ -7424,7 +7428,7 @@ test("sessions.create resolves an agent-qualified fork from the parent store", a
     });
 
     expect(created.ok, JSON.stringify(created.error)).toBe(true);
-    expect(created.payload?.key).toMatch(/^agent:main:dashboard:/);
+    expect(created.payload?.key).toMatch(/^agent:work:dashboard:/);
     expect(created.payload?.entry?.parentSessionKey).toBe("agent:work:main");
     expect(created.payload?.entry?.forkSource).toEqual({
       sessionKey: "agent:work:main",
@@ -7439,7 +7443,7 @@ test("sessions.create resolves an agent-qualified fork from the parent store", a
           "agent-qualified forked session id",
         ),
         sessionKey: created.payload?.key ?? "",
-        storePath: mainStorePath,
+        storePath: workStorePath,
       }),
     ).resolves.toEqual(
       expect.arrayContaining([
