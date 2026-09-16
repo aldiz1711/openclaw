@@ -92,6 +92,9 @@ final class DashboardDownloadTests: XCTestCase {
         invalidResponse: Bool = false,
         body: @MainActor (DashboardWindowController, NSWindow, URL) async throws -> Void) async throws
     {
+        // TEMP-DIAG4: amputation. Skip all fixtures to test whether their
+        // execution causes the QuickChat deactivate failure. Revert after diagnosis.
+        throw XCTSkip("TEMP-DIAG4 amputation experiment")
         _ = Self.activationSpy
         try await self.runDownloadFixture(source: source, invalidResponse: invalidResponse, body: body)
         let deadline = ContinuousClock.now + .seconds(10)
