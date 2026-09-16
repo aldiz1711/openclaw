@@ -3,6 +3,7 @@ import path from "node:path";
 import { normalizeStringEntries } from "@openclaw/normalization-core/string-normalization";
 import { truncateUtf16Safe } from "@openclaw/normalization-core/utf16-slice";
 import { emitDiagnosticEventWithTrustedTraceContext } from "../infra/diagnostic-events.js";
+import { recordDiagnosticToolExecutionDeadline } from "../infra/diagnostic-tool-execution-liveness.js";
 import { formatErrorMessage } from "../infra/errors.js";
 import {
   type EventSessionRoutingPolicy,
@@ -45,6 +46,7 @@ import {
   isProcessSessionIdTaken,
   markExited,
   recordNotifyOnExitRemoval,
+  resolveProcessCleanupMs,
   tail,
 } from "./bash-process-registry.js";
 import {
@@ -639,6 +641,7 @@ export async function runExecProcess({
   startupSignal: initialStartupSignal,
   onUpdate: initialOnUpdate,
   beforeSpawn: initialBeforeSpawn,
+  assertCurrent: initialAssertCurrent,
   onSettledBeforeNotify: initialOnSettledBeforeNotify,
   ...opts
 }: {
@@ -657,6 +660,7 @@ export async function runExecProcess({
   warnings: string[];
   maxOutput: number;
   pendingMaxOutput: number;
+  cleanupMs?: number;
   notifyOnExit: boolean;
   notifyOnExitEmptySuccess?: boolean;
   scopeKey?: string;
@@ -675,6 +679,8 @@ export async function runExecProcess({
   onSettledBeforeNotify?: (outcome: ExecProcessOutcome) => void;
   /** Revalidates authorization after async preparation, immediately before each spawn attempt. */
   beforeSpawn?: () => Promise<AgentToolResult<ExecToolDetails> | undefined>;
+  /** Rechecks host policy at the supervisor's final synchronous spawn boundary. */
+  assertCurrent?: () => void;
 }): Promise<ExecProcessHandle> {
   let assertSourceActive: (() => void) | undefined =
     captureAgentToolSourceExecutionGuard(initialStartupSignal);
@@ -693,6 +699,7 @@ export async function runExecProcess({
     command: opts.command,
     scopeKey: opts.scopeKey,
     sessionKey: opts.sessionKey,
+    cleanupMs: resolveProcessCleanupMs(opts.cleanupMs),
     agentId: opts.agentId,
     eventRouting: opts.eventRouting,
     notifyDeliveryContext: normalizeDeliveryContext(opts.notifyDeliveryContext),
@@ -725,6 +732,7 @@ export async function runExecProcess({
   // Clearing the callback also releases the completed turn's captured authority.
   let onUpdate = initialOnUpdate && AsyncLocalStorage.bind(initialOnUpdate);
   let beforeSpawn = initialBeforeSpawn;
+  let assertPolicyCurrent = initialAssertCurrent;
   let onSettledBeforeNotify = initialOnSettledBeforeNotify;
 
   const emitUpdate = () => {
@@ -775,6 +783,7 @@ export async function runExecProcess({
 
   const timeoutMs = resolveExecTimeoutMs(opts.timeoutSec);
   let sandboxFinalizeToken: unknown;
+  let assertSandboxCurrent: (() => void) | undefined;
   let sandboxPrepared = false;
   let sandboxFinalized = false;
   const finalizeSandboxExec = async (params: {
@@ -803,6 +812,7 @@ export async function runExecProcess({
         timedOut: outcome.timedOut,
       });
     } catch (error) {
+      session.finalizationFailed = true;
       recordAgentCleanupFailure();
       if (outcome.status === "completed") {
         finalOutcome = buildExecRuntimeErrorOutcome({
@@ -836,6 +846,7 @@ export async function runExecProcess({
           maybeNotifyOnExit(session, finalOutcome.status);
         }
       } catch (error) {
+        session.finalizationFailed = true;
         // Recover before yielding: scope joins queued by markExited must not
         // outrun the task's failed outcome or restore its environment state.
         finalOutcome = buildExecRuntimeErrorOutcome({
@@ -870,6 +881,7 @@ export async function runExecProcess({
         usePty: opts.usePty,
       });
       sandboxFinalizeToken = backendExecSpec.finalizeToken;
+      assertSandboxCurrent = backendExecSpec.assertCurrent;
       // Cleanup ownership transfers only after buildExecSpec resolves: moving this earlier can
       // double-finalize backend failures, while removing it leaks the registered exec session.
       sandboxPrepared = true;
@@ -877,6 +889,7 @@ export async function runExecProcess({
         mode: "child" as const,
         argv: backendExecSpec.argv,
         env: backendExecSpec.env,
+        cwd: backendExecSpec.cwd,
         stdinMode: backendExecSpec.stdinMode,
       };
     }
@@ -889,6 +902,8 @@ export async function runExecProcess({
       opts.pathPrepend,
     );
     const commandWithShellSnapshot = await maybeWrapCommandWithShellSnapshot({
+      // A bound execution plan must not load aliases/functions or replace its PATH.
+      enabled: opts.execCommand === undefined,
       command: commandWithPathPrepend,
       shell,
       shellArgs,
@@ -904,6 +919,7 @@ export async function runExecProcess({
       mode: opts.usePty ? ("pty" as const) : ("child" as const),
       argv,
       env: shellRuntimeEnv,
+      cwd: opts.workdir,
       stdinMode: opts.usePty ? ("pipe-open" as const) : ("pipe-closed" as const),
     };
   };
@@ -919,10 +935,18 @@ export async function runExecProcess({
     }
   };
   const spawn = (input: SpawnInput) => {
-    // No await between source authority validation and supervisor admission.
-    assertSourceActive?.();
+    const assertSourceCurrent = assertSourceActive;
+    const assertRuntimeCurrent = assertSandboxCurrent;
+    const assertHostPolicyCurrent = assertPolicyCurrent;
+    const assertCurrent = () => {
+      assertSourceCurrent?.();
+      assertRuntimeCurrent?.();
+    };
+    // Source authority covers construction; approval policy ends at native launch.
+    assertCurrent();
+    assertHostPolicyCurrent?.();
     return withoutGatewayToolCallerIdentity(() =>
-      supervisor.spawn({ ...input, assertCurrent: assertSourceActive }),
+      supervisor.spawn({ ...input, assertCurrent, beforeSpawn: assertHostPolicyCurrent }),
     );
   };
 
@@ -934,7 +958,7 @@ export async function runExecProcess({
       runId: sessionId,
       ...(opts.sandbox ? { cleanupOwnership: "external" as const } : {}),
       scopeKey: opts.scopeKey,
-      cwd: opts.workdir,
+      cwd: spawnSpec.cwd ?? opts.workdir,
       env: spawnSpec.env,
       timeoutMs,
       captureOutput: false,
@@ -989,9 +1013,12 @@ export async function runExecProcess({
     throw error;
   } finally {
     beforeSpawn = undefined;
+    assertPolicyCurrent = undefined;
     assertSourceActive = undefined;
+    assertSandboxCurrent = undefined;
   }
   session.processActivity = managedRun.activity;
+  recordDiagnosticToolExecutionDeadline(managedRun.activity.deadlineAtMs);
   session.stdin = managedRun.stdin;
   session.pid = managedRun.pid;
 

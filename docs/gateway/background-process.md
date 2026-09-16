@@ -32,11 +32,12 @@ Behavior:
 - Backgrounded and `yieldMs` runs inherit `tools.exec.timeoutSeconds` unless the call passes an explicit `timeoutSeconds`.
 - Returning a background session ID does not stop the process timeout. For a persistent service on the gateway or in a sandbox, use `background: true` with `timeoutSeconds: 0`, then stop it with `process` action `kill` when finished. Host and worker lifecycle limits still apply.
 - Output stays in memory up to the per-session aggregate cap until the session is polled or cleared.
-- Finished sessions expire after their configured TTL. The registry also retains at most 50 finished sessions and 2,000,000 total retained output characters, evicting the oldest records first. The newest completed session retains its capped per-session aggregate even when that record alone exceeds the global limit.
+- Finished sessions expire after their configured TTL, measured from completion. Each exec captures its agent's retention setting when admitted; using another agent's process tool does not change existing results' lifetimes. The registry also retains at most 50 finished sessions and 2,000,000 total retained output characters, evicting the oldest records first. The newest completed session retains its capped per-session aggregate even when that record alone exceeds the global limit.
 - If the `process` tool is disallowed, `exec` runs synchronously and ignores `yieldMs`/`background`.
 - Spawned exec commands receive `OPENCLAW_SHELL=exec` for context-aware shell/profile rules.
 - For long-running work that starts now: start it once and rely on automatic completion wake (when enabled) once the command emits output or fails.
 - If automatic completion wake is unavailable, or you need quiet-success confirmation for a command that exits cleanly with no output, poll with `process`.
+- Background exec does not automatically wake subagent sessions. A subagent must collect its command result with `process poll` before yielding without another completion source. A requested stop also needs its terminal result collected.
 - Don't emulate reminders or delayed follow-ups with `sleep` loops or repeated polling — use cron for future work.
 
 ### Env overrides
@@ -134,6 +135,7 @@ Notes:
 - `process remove` can hide a running session immediately after requesting termination; suspension and restart remain blocked until exit confirmation.
 - Session logs are only saved to chat history if you run `process poll`/`log` and the tool result is recorded.
 - `process` is scoped per agent; it only sees sessions started by that agent.
+- After an explicit `kill` or task cancellation, `poll` and `log` report a confirmed requested stop as a completed observation, retaining the process's signal and cancellation reason. Unexpected termination, timeouts, and cleanup failures remain errors. The process list retains the underlying terminal status.
 - Use `poll`/`log` for status, logs, or completion confirmation when automatic completion wake is unavailable.
 - Use `log` before recovering an interactive CLI, so the current transcript, stdin state, and input-wait hint are visible together.
 - Use `write`/`send-keys`/`submit`/`paste`/`kill` when you need input or intervention.

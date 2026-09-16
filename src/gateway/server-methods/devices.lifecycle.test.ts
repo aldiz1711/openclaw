@@ -1,5 +1,9 @@
 import { expectDefined } from "@openclaw/normalization-core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  onInternalDiagnosticEvent,
+  type DiagnosticSecurityEvent,
+} from "../../infra/diagnostic-events.js";
 import { createDeferredCore } from "../../shared/deferred.js";
 import { drainNodePendingWork, enqueueNodePendingWork } from "../node-pending-work.js";
 import { captureNodeWakeLifecycle, releaseNodeWakeLifecycle } from "../node-wake-state.js";
@@ -25,6 +29,110 @@ const { deviceHandlers } = await import("./devices.js");
 
 describe("device lifecycle", () => {
   beforeEach(resetDeviceHandlerTestState);
+
+  it.each(
+    ["rotate", "revoke"].flatMap((operation) =>
+      ["ownership", "role", "service"].map((denial) => ({ operation, denial })),
+    ),
+  )("preserves $operation $denial denial ordering and privacy", async ({ operation, denial }) => {
+    const method = `device.token.${operation}`;
+    const deviceId = denial === "ownership" ? " device-2 " : " device-1 ";
+    const role = denial === "service" ? " operator " : " node ";
+    const reason =
+      denial === "ownership"
+        ? "device-ownership-mismatch"
+        : denial === "role"
+          ? "role-management-requires-admin"
+          : "caller-missing-scope";
+    const wording = operation === "rotate" ? "rotation" : "revocation";
+    const order: string[] = [];
+    const events: DiagnosticSecurityEvent[] = [];
+    const trusted: boolean[] = [];
+    const mutation = operation === "rotate" ? rotateDeviceTokenMock : revokeDeviceTokenMock;
+    if (denial === "service") {
+      mutation.mockImplementationOnce(async () => {
+        order.push("service");
+        return { ok: false, reason: "caller-missing-scope", scope: "operator.admin" };
+      });
+    }
+    const opts = createOptions(
+      method,
+      { deviceId, role },
+      {
+        client: createClient(["operator.pairing"], " device-1 ", { isDeviceTokenAuth: true }),
+      },
+    );
+    const updateSurface = vi.spyOn(opts.context.nodeRegistry, "updateSurface");
+    vi.mocked(opts.context.logGateway.warn).mockImplementation(() => {
+      order.push("warn");
+    });
+    vi.mocked(opts.respond).mockImplementation(() => {
+      order.push("respond");
+    });
+    const stop = onInternalDiagnosticEvent((event, metadata) => {
+      if (event.type === "security.event") {
+        order.push("event");
+        events.push(event);
+        trusted.push(metadata.trusted);
+      }
+    });
+    try {
+      await expectDefined(deviceHandlers[method], method)(opts);
+    } finally {
+      stop();
+    }
+    expect(order).toEqual([
+      ...(denial === "service" ? ["service"] : []),
+      "warn",
+      "event",
+      "respond",
+    ]);
+    if (denial === "service") {
+      expect(mutation).toHaveBeenCalledExactlyOnceWith({
+        deviceId,
+        role,
+        callerScopes: ["operator.pairing"],
+        ...(operation === "rotate" ? { scopes: undefined } : {}),
+      });
+    } else {
+      expect(mutation).not.toHaveBeenCalled();
+    }
+    expect(opts.context.logGateway.warn).toHaveBeenCalledExactlyOnceWith(
+      `device token ${wording} denied device=${deviceId} role=${role} reason=${reason}${denial === "service" ? " scope=operator.admin" : ""}`,
+    );
+    expect(opts.respond).toHaveBeenCalledExactlyOnceWith(false, undefined, {
+      code: "INVALID_REQUEST",
+      message: `device token ${wording} denied`,
+    });
+    expect(trusted).toEqual([true]);
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      type: "security.event",
+      category: "auth",
+      action: `device.token.${wording}_denied`,
+      outcome: "denied",
+      severity: "medium",
+      reason,
+      actor: {
+        kind: "operator",
+        role: "operator",
+        deviceIdHash: expect.stringMatching(/^sha256:[a-f0-9]{12}$/u),
+      },
+      target: { kind: "device", idHash: expect.stringMatching(/^sha256:[a-f0-9]{12}$/u) },
+      policy: { id: "gateway.device-token", decision: "deny", reason },
+      control: { id: method, family: "auth" },
+      attributes: { role: role.trim() },
+    });
+    const serialized = JSON.stringify(events);
+    expect(serialized).not.toContain("device-1");
+    expect(serialized).not.toContain("device-2");
+    expect(serialized).not.toContain("operator.admin");
+    expect(opts.context.logGateway.info).not.toHaveBeenCalled();
+    expect(opts.context.broadcast).not.toHaveBeenCalled();
+    expect(opts.context.invalidateClientsForDevice).not.toHaveBeenCalled();
+    expect(opts.context.disconnectClientsForDevice).not.toHaveBeenCalled();
+    expect(updateSurface).not.toHaveBeenCalled();
+  });
 
   it("clears and invalidates node runtime state after removing a full device pairing", async () => {
     const nodeId = "disconnected-node-device";
@@ -505,51 +613,36 @@ describe("device lifecycle", () => {
     );
   });
 
-  it("invalidates an in-flight node wake when the node token rotates", async () => {
-    rotateDeviceTokenMock.mockResolvedValue({
-      ok: true,
-      entry: {
-        token: "new-node-token",
-        role: "node",
-        scopes: [],
-        createdAtMs: 456,
-        rotatedAtMs: 789,
-      },
-    });
-    const lifecycle = captureNodeWakeLifecycle("device-1");
-    const opts = createOptions(
-      "device.token.rotate",
-      { deviceId: "device-1", role: "node" },
-      { client: createClient(["operator.admin"], "admin-device", { isDeviceTokenAuth: true }) },
-    );
+  it.each(["device.token.rotate", "device.token.revoke"] as const)(
+    "invalidates an in-flight node wake after %s",
+    async (method) => {
+      const mutation =
+        method === "device.token.rotate" ? rotateDeviceTokenMock : revokeDeviceTokenMock;
+      mutation.mockResolvedValue({
+        ok: true,
+        entry:
+          method === "device.token.rotate"
+            ? {
+                token: "new-node-token",
+                role: "node",
+                scopes: [],
+                createdAtMs: 456,
+                rotatedAtMs: 789,
+              }
+            : { role: "node", revokedAtMs: 789 },
+      });
+      const lifecycle = captureNodeWakeLifecycle("device-1");
+      const opts = createOptions(
+        method,
+        { deviceId: "device-1", role: "node" },
+        { client: createClient(["operator.admin"], "admin-device", { isDeviceTokenAuth: true }) },
+      );
 
-    await expectDefined(
-      deviceHandlers["device.token.rotate"],
-      'deviceHandlers["device.token.rotate"] test invariant',
-    )(opts);
+      await expectDefined(deviceHandlers[method], method)(opts);
 
-    expect(lifecycle.aborted).toBe(true);
-  });
-
-  it("invalidates an in-flight node wake when the node token is revoked", async () => {
-    revokeDeviceTokenMock.mockResolvedValue({
-      ok: true,
-      entry: { role: "node", revokedAtMs: 789 },
-    });
-    const lifecycle = captureNodeWakeLifecycle("device-1");
-    const opts = createOptions(
-      "device.token.revoke",
-      { deviceId: "device-1", role: "node" },
-      { client: createClient(["operator.admin"], "admin-device", { isDeviceTokenAuth: true }) },
-    );
-
-    await expectDefined(
-      deviceHandlers["device.token.revoke"],
-      'deviceHandlers["device.token.revoke"] test invariant',
-    )(opts);
-
-    expect(lifecycle.aborted).toBe(true);
-  });
+      expect(lifecycle.aborted).toBe(true);
+    },
+  );
 
   it("keeps node wake ownership across unrelated operator token rotation", async () => {
     mockRotateOperatorTokenSuccess();
@@ -569,67 +662,47 @@ describe("device lifecycle", () => {
     releaseNodeWakeLifecycle("device-1", lifecycle);
   });
 
-  it("invalidates affected clients synchronously before responding to device.token.rotate", async () => {
-    mockPairedOperatorDevice();
-    mockRotateOperatorTokenSuccess();
-    const opts = createOptions(
-      "device.token.rotate",
-      { deviceId: "device-1", role: "operator", scopes: ["operator.pairing"] },
-      { client: createClient(["operator.pairing"], "device-1", { isDeviceTokenAuth: true }) },
-    );
-    const respond = vi.mocked(opts.respond);
-    const invalidate = vi.mocked(opts.context.invalidateClientsForDevice!);
-    const disconnect = vi.mocked(opts.context.disconnectClientsForDevice!);
+  it.each(["device.token.rotate", "device.token.revoke"] as const)(
+    "invalidates affected clients synchronously before responding to %s",
+    async (method) => {
+      const rotating = method === "device.token.rotate";
+      if (rotating) {
+        mockPairedOperatorDevice();
+        mockRotateOperatorTokenSuccess();
+      } else {
+        revokeDeviceTokenMock.mockResolvedValue({
+          ok: true,
+          entry: { role: "operator", revokedAtMs: 456 },
+        });
+      }
+      const opts = createOptions(
+        method,
+        {
+          deviceId: "device-1",
+          role: "operator",
+          ...(rotating ? { scopes: ["operator.pairing"] } : {}),
+        },
+        { client: createClient(["operator.pairing"], "device-1", { isDeviceTokenAuth: true }) },
+      );
+      const respond = vi.mocked(opts.respond);
+      const invalidate = vi.mocked(opts.context.invalidateClientsForDevice!);
+      const disconnect = vi.mocked(opts.context.disconnectClientsForDevice!);
 
-    respond.mockImplementation(() => {
-      expect(invalidate).toHaveBeenCalledWith("device-1", {
-        role: "operator",
-        reason: "device-token-rotated",
+      respond.mockImplementation(() => {
+        expect(invalidate).toHaveBeenCalledWith("device-1", {
+          role: "operator",
+          reason: rotating ? "device-token-rotated" : "device-token-revoked",
+        });
+        expect(disconnect).not.toHaveBeenCalled();
       });
-      expect(disconnect).not.toHaveBeenCalled();
-    });
 
-    await expectDefined(
-      deviceHandlers["device.token.rotate"],
-      'deviceHandlers["device.token.rotate"] test invariant',
-    )(opts);
-    await Promise.resolve();
+      await expectDefined(deviceHandlers[method], method)(opts);
+      await Promise.resolve();
 
-    expect(respond).toHaveBeenCalled();
-    expect(disconnect).toHaveBeenCalledWith("device-1", { role: "operator" });
-  });
-
-  it("invalidates affected clients synchronously before responding to device.token.revoke", async () => {
-    revokeDeviceTokenMock.mockResolvedValue({
-      ok: true,
-      entry: { role: "operator", revokedAtMs: 456 },
-    });
-    const opts = createOptions(
-      "device.token.revoke",
-      { deviceId: "device-1", role: "operator" },
-      { client: createClient(["operator.pairing"], "device-1", { isDeviceTokenAuth: true }) },
-    );
-    const respond = vi.mocked(opts.respond);
-    const invalidate = vi.mocked(opts.context.invalidateClientsForDevice!);
-    const disconnect = vi.mocked(opts.context.disconnectClientsForDevice!);
-
-    respond.mockImplementation(() => {
-      expect(invalidate).toHaveBeenCalledWith("device-1", {
-        role: "operator",
-        reason: "device-token-revoked",
-      });
-      expect(disconnect).not.toHaveBeenCalled();
-    });
-
-    await expectDefined(
-      deviceHandlers["device.token.revoke"],
-      'deviceHandlers["device.token.revoke"] test invariant',
-    )(opts);
-    await Promise.resolve();
-
-    expect(respond).toHaveBeenCalled();
-    expect(disconnect).toHaveBeenCalledWith("device-1", { role: "operator" });
-  });
+      expect(respond).toHaveBeenCalled();
+      expect(disconnect).toHaveBeenCalledWith("device-1", { role: "operator" });
+    },
+  );
 
   it("treats normalized device ids as self-owned for token rotation", async () => {
     mockPairedOperatorDevice();

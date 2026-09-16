@@ -13,7 +13,6 @@ import type {
 } from "./bot-message-dispatch.types.js";
 import { resolveTelegramDraftStreamingChunking } from "./draft-chunking.js";
 import { createTelegramDraftStream, type TelegramDraftPreview } from "./draft-stream.js";
-import { renderTelegramHtmlText } from "./format.js";
 import type { DraftLaneState, LaneName } from "./lane-delivery-text-deliverer.js";
 import { TELEGRAM_TEXT_CHUNK_LIMIT } from "./outbound-adapter.js";
 import { recordOutboundMessageForPromptContext } from "./outbound-message-context.js";
@@ -49,8 +48,7 @@ function renderStreamText(
         }),
       }
     : {
-        text: renderTelegramHtmlText(text, { tableMode: turn.tableMode }),
-        parseMode: "HTML",
+        text,
         markdownSource: { text, tableMode: turn.tableMode },
       };
 }
@@ -125,7 +123,7 @@ export function createDraftState(params: TurnConfig): TelegramDraftStateSlice {
               }
             : {}),
           onProviderMessage: async (message) => {
-            recordSentMessage(params.context.chatId, message.message_id, params.cfg, {
+            await recordSentMessage(params.context.chatId, message.message_id, params.cfg, {
               accountId: params.context.route.accountId,
               agentId: params.opts.ownerAgentId,
             });
@@ -242,6 +240,12 @@ export async function rotateAnswerLaneForNewMessage(turn: Turn) {
   // An accepted block must become durable before rotation; otherwise cleanup
   // can discard its only visible preview.
   await turn.materializeAnswerLaneBeforeRotation();
+  if (!turn.answerLane.finalized) {
+    // Unaccepted partial text remains a preview, including across tool-only
+    // messages. Reposition with cleanup instead of retaining it as a reply.
+    repositionLaneForNewMessage(turn, turn.answerLane);
+    return;
+  }
   await rotateLaneForNewMessage(turn, turn.answerLane);
 }
 
@@ -564,7 +568,7 @@ export async function cleanupDrafts(turn: Turn, superseded: boolean): Promise<vo
       continue;
     }
     if (superseded) {
-      await (typeof stream.discard === "function" ? stream.discard() : stream.stop());
+      await stream.discard();
     } else if (lane.finalized) {
       await stream.stop();
     } else {

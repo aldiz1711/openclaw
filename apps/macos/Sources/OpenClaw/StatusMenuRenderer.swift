@@ -337,7 +337,7 @@ final class StatusMenuRenderer: NSObject {
         case .talkMode:
             Task { await self.state.setTalkEnabled(!self.state.talkEnabled) }
         case .allSessions:
-            Task { await DashboardManager.shared.show(atPath: DashboardRouteMap.sessionsPagePath) }
+            AppNavigationActions.openPrimaryWebRoute(DashboardRouteMap.sessionsPagePath)
         case .settings:
             AppNavigationActions.openSettings()
         case .connection:
@@ -373,7 +373,7 @@ final class StatusMenuRenderer: NSObject {
             "checkmark.shield"))
         #endif
 
-        if self.state.connectionMode == .remote {
+        if self.state.connectionMode == .remote, self.state.remoteTransport == .ssh {
             entries.append(self.debugItem(
                 "tunnel",
                 String(localized: "Reset Remote Tunnel"),

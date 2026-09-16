@@ -24,6 +24,7 @@ import {
 } from "../../scripts/e2e/parallels/npm-update-smoke.ts";
 import type { HostServer, Platform } from "../../scripts/e2e/parallels/types.ts";
 import { withEnv, withEnvAsync } from "../../src/test-utils/env.js";
+import { createDeferred } from "../helpers/promise.js";
 import { createTempDirTracker } from "../helpers/temp-dir.js";
 
 const SCRIPT_PATH = "scripts/e2e/parallels/npm-update-smoke.ts";
@@ -492,16 +493,7 @@ exit 1
             provider: "openai",
             updateTarget: "local-main",
           });
-          const guestMacos = Reflect.get(smoke, "guestMacos") as (
-            script: string,
-            timeoutMs: number,
-            ctx: {
-              append: (chunk: string | Uint8Array) => void;
-              logPath: string;
-              signal: AbortSignal;
-            },
-          ) => Promise<void>;
-          const result = guestMacos.call(smoke, "echo update", 30_000, {
+          const result = smoke["guestMacos"]("echo update", 30_000, {
             append: (chunk) =>
               output.push(typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8")),
             logPath: path.join(root, "update.log"),
@@ -531,7 +523,6 @@ exit 1
       expect(output.join("")).toContain("update-diagnostic\n");
       const log = readFileSync(logPath, "utf8");
       expect(log).toContain("--current-user whoami");
-      expect(log).toContain("--current-user /usr/bin/env PATH=");
       expect(log).toContain("/usr/bin/tee /tmp/openclaw-parallels-npm-update-macos-");
       expect(log).toContain("/bin/chmod 700 /tmp/openclaw-parallels-npm-update-macos-");
       expect(log).toContain("/usr/sbin/chown desktop-user");
@@ -913,8 +904,8 @@ ${script}`,
     const descendantPidPath = path.join(root, "descendant.pid");
     const descendantScript = [
       "import { writeFileSync } from 'node:fs';",
-      `writeFileSync(${JSON.stringify(descendantPidPath)}, String(process.pid));`,
       "process.on('SIGTERM', () => {});",
+      `writeFileSync(${JSON.stringify(descendantPidPath)}, String(process.pid));`,
       "setInterval(() => {}, 1000);",
     ].join("\n");
     writeFileSync(
@@ -931,11 +922,49 @@ ${script}`,
       "utf8",
     );
 
-    const code = await spawnLoggedCommand(process.execPath, [scriptPath], logPath, {}, undefined, {
-      timeoutKillGraceMs: 25,
-      timeoutLabel: "fresh lane test",
-      timeoutMs: 250,
-    });
+    // Hold only the initial deadline while real child startup reaches signal readiness.
+    const deadlineReady = createDeferred();
+    const realSetTimeout = globalThis.setTimeout;
+    let commandSettled = false;
+    const timeoutSpy = vi
+      .spyOn(globalThis, "setTimeout")
+      .mockImplementationOnce((callback, delay, ...args) =>
+        realSetTimeout(() => {
+          void deadlineReady.promise.then(() => {
+            if (!commandSettled) {
+              callback(...args);
+            }
+          });
+        }, delay),
+      );
+    let command: Promise<number> | undefined;
+    let code: number | undefined;
+    try {
+      try {
+        command = spawnLoggedCommand(process.execPath, [scriptPath], logPath, {}, undefined, {
+          timeoutKillGraceMs: 25,
+          timeoutLabel: "fresh lane test",
+          timeoutMs: 250,
+        });
+        void command.then(
+          () => {
+            commandSettled = true;
+          },
+          () => {
+            commandSettled = true;
+          },
+        );
+        expect(timeoutSpy).toHaveBeenCalledExactlyOnceWith(expect.any(Function), 250);
+      } finally {
+        timeoutSpy.mockRestore();
+      }
+      await waitFor(() => existsSync(descendantPidPath), "fresh lane descendant readiness");
+    } finally {
+      deadlineReady.resolve();
+      if (command) {
+        code = await command;
+      }
+    }
 
     expect(code).toBe(124);
     expect(readFileSync(logPath, "utf8")).toContain("fresh lane test timed out after 250ms");

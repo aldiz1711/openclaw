@@ -1,6 +1,7 @@
-// User turn transcript helpers extract user-turn text from session transcripts.
 import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
+import type { Result } from "@openclaw/normalization-core/result";
+import type { AgentRunTerminalOutcome } from "../agents/agent-run-terminal-outcome.types.js";
 import {
   bindSessionPendingInputSources,
   persistSessionTranscriptTurn,
@@ -8,13 +9,16 @@ import {
   withSessionPendingInputPersistence,
   publishTranscriptUpdate,
   readActiveTranscriptEntryAnchor,
+  resolveSessionTranscriptRuntimeTarget,
   rewriteTranscriptMessageAtAnchor,
   type TranscriptEntryAnchor,
   type SessionTranscriptTurnPersistOptions,
 } from "../config/sessions/session-accessor.js";
 import { waitForSessionTranscriptProjection } from "../config/sessions/session-transcript-reconcile.js";
-import { resolveUserTurnTranscriptAdmission } from "./user-turn-transcript-admission.js";
-import { registerUserTurnTranscriptAdmissionOwner } from "./user-turn-transcript-annotation.js";
+import {
+  registerUserTurnTranscriptAdmissionOwner,
+  resolveUserTurnTranscriptAdmission,
+} from "./user-turn-transcript-admission.js";
 import {
   buildLateResolvedMediaMessage,
   isUserMessage,
@@ -228,6 +232,7 @@ export function createUserTurnTranscriptRecorder(
   let replacementText: string | undefined;
   let confirmedSteerTargetRunId: string | undefined;
   let pendingInput: Awaited<ReturnType<typeof stageSessionPendingInput>>;
+  let processingCompletion: Result<AgentRunTerminalOutcome, unknown> | undefined;
   let staging: Promise<boolean> | undefined;
 
   const applyReplacementText = (
@@ -245,8 +250,16 @@ export function createUserTurnTranscriptRecorder(
     return Object.keys(metadata).length > 0 ? { ...next, __openclaw: metadata } : next;
   };
 
-  const applyMessageOverrides = (candidate: PersistedUserTurnMessage | undefined) =>
-    rewritePersistedSteerTargetRunId(applyReplacementText(candidate), confirmedSteerTargetRunId);
+  const applyMessageOverrides = (candidate: PersistedUserTurnMessage | undefined) => {
+    const next = rewritePersistedSteerTargetRunId(
+      applyReplacementText(candidate),
+      confirmedSteerTargetRunId,
+    );
+    // Native mirrors must reuse this admission even when no transport supplied a key.
+    return next && !next.idempotencyKey
+      ? { ...next, idempotencyKey: buildRunUserTurnIdempotencyKey(logicalTurnId) }
+      : next;
+  };
 
   const handlePersistenceError = (error: unknown) => {
     if (params.onPersistenceError) {
@@ -522,6 +535,13 @@ export function createUserTurnTranscriptRecorder(
       return message;
     },
     resolveMessage: resolveMessageForPersistence,
+    assertOriginalInputCommit: params.assertOriginalInputCommit
+      ? () => {
+          if (!blocked && !persisted && !runtimePersisted && !pendingInput) {
+            params.assertOriginalInputCommit!();
+          }
+        }
+      : undefined,
     stageApproved: (options) => {
       staging ??= (async () => {
         const candidate = await resolveMessageForPersistence();
@@ -529,17 +549,23 @@ export function createUserTurnTranscriptRecorder(
         if (!candidate || !target || persisted || runtimePersisted) {
           return false;
         }
-        pendingInput = await stageSessionPendingInput(target, {
-          ...options,
-          requestFingerprint: params.pendingInputRequestFingerprint,
-          message: candidate,
-          config: target.config as SessionTranscriptTurnPersistOptions["config"],
-          prepareMessageAfterIdempotencyCheck: (next) =>
-            preparePersistedUserTurnMessageForTranscriptWrite(next, {
-              ...target,
-              beforeMessageWrite: params.beforeMessageWrite ?? target.beforeMessageWrite,
-            }),
-        });
+        const config = target.config as SessionTranscriptTurnPersistOptions["config"];
+        const runtimeTarget = await resolveSessionTranscriptRuntimeTarget(target, config);
+        pendingInput = await stageSessionPendingInput(
+          { ...target, ...runtimeTarget },
+          {
+            ...options,
+            requestFingerprint: params.pendingInputRequestFingerprint,
+            trackCompletion: params.trackInputCompletion,
+            message: candidate,
+            config,
+            prepareMessageAfterIdempotencyCheck: (next) =>
+              preparePersistedUserTurnMessageForTranscriptWrite(next, {
+                ...target,
+                beforeMessageWrite: params.beforeMessageWrite ?? target.beforeMessageWrite,
+              }),
+          },
+        );
         if (!pendingInput) {
           return false;
         }
@@ -550,6 +576,27 @@ export function createUserTurnTranscriptRecorder(
       return staging;
     },
     getPendingInputMessage: () => pendingInput?.message,
+    getProcessingCompletion: () =>
+      processingCompletion?.ok ? processingCompletion.value : pendingInput?.completion,
+    completeProcessing: (outcome) => {
+      if (!pendingInput?.complete) {
+        return undefined;
+      }
+      // Abort records its terminal outcome before releasing the controller.
+      // Final publication reuses that committed result (or the original write
+      // failure), without trying another write under revoked ownership.
+      if (!processingCompletion) {
+        try {
+          processingCompletion = { ok: true, value: pendingInput.complete(outcome) };
+        } catch (error) {
+          processingCompletion = { ok: false, error };
+        }
+      }
+      if (!processingCompletion.ok) {
+        throw processingCompletion.error;
+      }
+      return processingCompletion.value;
+    },
     isPendingInputConsumed: () => pendingInput?.state === "consumed",
     withPendingInput: (run) => (pendingInput ? pendingInput.run(run) : run()),
     finishPendingInput: (disposition) => {
@@ -674,6 +721,7 @@ export function createUserTurnTranscriptRecorder(
     receipt: () => admissionReceipt,
     message: () => admittedMessage,
     blocked: () => blocked || confirmedSteerTargetRunId !== undefined,
+    sentToProvider: () => sentToProvider,
     refresh: refreshAdmission,
   });
   return recorder;

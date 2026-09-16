@@ -5,7 +5,6 @@ import type {
   SkillWorkshopMode,
   SkillWorkshopProposal,
 } from "../../lib/skill-workshop/index.ts";
-import { createSkillWorkshopHistoryScanState } from "./state.ts";
 import type { SkillWorkshopProps } from "./view-types.ts";
 import { renderSkillWorkshop } from "./view.ts";
 
@@ -94,7 +93,6 @@ function propsFor(mode: SkillWorkshopMode): SkillWorkshopProps {
       canApply: true,
       canRevise: true,
       canReject: true,
-      canScanHistory: true,
     },
     loading: false,
     error: null,
@@ -104,10 +102,7 @@ function propsFor(mode: SkillWorkshopMode): SkillWorkshopProps {
     installedSelection: { status: "idle" },
     onSelectInstalled: vi.fn(),
     onRetryInstalled: vi.fn(),
-    onShowHistory: vi.fn(),
     selectedKey: proposal.key,
-    appliedDiffMode: "changes",
-    statusFilter: "pending",
     query: "",
     filePreviewKey: null,
     filePreviewQuery: "",
@@ -121,16 +116,12 @@ function propsFor(mode: SkillWorkshopMode): SkillWorkshopProps {
     assistantName: "OpenClaw",
     workshopAgentName: "Research",
     selfLearning: null,
-    historyScan: createSkillWorkshopHistoryScanState(),
-    counts: { all: 1, pending: 1, applied: 0, rejected: 0, quarantined: 0, stale: 0 },
-    onStatusFilterChange: vi.fn(),
     onRetry: vi.fn(),
     onQueryChange: vi.fn(),
     onFilePreviewQueryChange: vi.fn(),
     onQueueWidthChange: vi.fn(),
     onModeChange: vi.fn(),
     onSelect: vi.fn(),
-    onAppliedDiffModeChange: vi.fn(),
     onPrev: vi.fn(),
     onNext: vi.fn(),
     onApply: vi.fn(),
@@ -143,7 +134,6 @@ function propsFor(mode: SkillWorkshopMode): SkillWorkshopProps {
     onPreviewFile: vi.fn(),
     onClosePreview: vi.fn(),
     onSelfLearningToggle: vi.fn(),
-    onHistoryScan: vi.fn(),
   };
 }
 
