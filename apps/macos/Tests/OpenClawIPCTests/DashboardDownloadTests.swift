@@ -68,34 +68,11 @@ final class DashboardDownloadTests: XCTestCase {
         }
     }
 
-    // TEMP-DIAG: process-wide activation spy. Names whatever activates the app
-    // between the download fixtures and Quick Chat. Revert after diagnosis.
-    private static let activationSpy: Void = {
-        NotificationCenter.default.addObserver(
-            forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main)
-        { _ in
-            let app = NSApplication.shared
-            let kinds = app.windows.map { String(describing: type(of: $0)) }
-            print(
-                "TEMP-DIAG ACTIVATED key=\(String(describing: app.keyWindow)) main=\(String(describing: app.mainWindow)) windows=\(kinds)")
-        }
-        NotificationCenter.default.addObserver(
-            forName: NSWindow.didBecomeKeyNotification, object: nil, queue: .main)
-        { note in
-            print("TEMP-DIAG KEY window=\(String(describing: note.object))")
-        }
-        return ()
-    }()
-
     private func withDownload(
         source: Source = .http,
         invalidResponse: Bool = false,
         body: @MainActor (DashboardWindowController, NSWindow, URL) async throws -> Void) async throws
     {
-        // TEMP-DIAG4: amputation. Skip all fixtures to test whether their
-        // execution causes the QuickChat deactivate failure. Revert after diagnosis.
-        throw XCTSkip("TEMP-DIAG4 amputation experiment")
-        _ = Self.activationSpy
         try await self.runDownloadFixture(source: source, invalidResponse: invalidResponse, body: body)
         let deadline = ContinuousClock.now + .seconds(10)
         while NSApplication.shared.isActive, ContinuousClock.now < deadline {
@@ -103,10 +80,6 @@ final class DashboardDownloadTests: XCTestCase {
             try await Task.sleep(for: .milliseconds(50))
         }
         XCTAssertFalse(NSApplication.shared.isActive, "The download fixture must leave the app inactive.")
-        // TEMP-DIAG3: re-sync check. If deactivation is dropped by the runner,
-        // isActive flips back without any didBecomeActive post. Revert after diagnosis.
-        try await Task.sleep(for: .seconds(2))
-        print("TEMP-DIAG3 teardown resync isActive=\(NSApplication.shared.isActive)")
     }
 
     private func runDownloadFixture(
@@ -138,14 +111,6 @@ final class DashboardDownloadTests: XCTestCase {
                 ].joined(separator: "\r\n")
             })
         defer { server.stop() }
-        // Serial suites share one app. A late download callback can activate
-        // it after close; later suites require an inactive app. Quiesce loudly
-        // instead of leaking the failure into them.
-        defer {
-            for window in NSApplication.shared.windows {
-                window.close()
-            }
-        }
         let dashboardURL = server.url("/control/")
         let controller = DashboardWindowController(
             url: dashboardURL,

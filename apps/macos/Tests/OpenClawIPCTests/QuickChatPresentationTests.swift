@@ -32,19 +32,17 @@ final class QuickChatPresentationTests: XCTestCase {
         defer { controller.stop() }
         controller.start()
         controller.setEnabled(true)
-        // TEMP-DIAG3: capture pre-deactivate state. Revert after diagnosis.
-        print("TEMP-DIAG3 QuickChat start isActive=\(application.isActive)")
         application.deactivate()
-        try await self.waitUntil("deactivate") { !application.isActive }
+        try await self.waitUntil { !application.isActive }
         try XCTUnwrap(shortcut)()
 
-        try await self.waitUntil("present") { controller.isVisible && !model.isLoadingModelControls }
+        try await self.waitUntil { controller.isVisible && !model.isLoadingModelControls }
         let panel = try XCTUnwrap(application.windows.first {
             ($0.contentView as? NSHostingView<QuickChatView>)?.rootView.model === model
         })
         XCTAssertTrue(panel.isVisible)
         XCTAssertFalse(panel.hidesOnDeactivate)
-        try await self.waitUntil("firstResponder") { panel.firstResponder is NSTextView }
+        try await self.waitUntil { panel.firstResponder is NSTextView }
         XCTAssertTrue(panel.firstResponder is NSTextView)
         print(
             "Quick Chat presented: visible=\(panel.isVisible), active=\(application.isActive), key=\(panel.isKeyWindow), editorReady=\(panel.firstResponder is NSTextView)")
@@ -61,7 +59,7 @@ final class QuickChatPresentationTests: XCTestCase {
 
         controller.dismiss()
         try XCTUnwrap(shortcut)()
-        try await self.waitUntil("reopen") { controller.isVisible }
+        try await self.waitUntil { controller.isVisible }
         XCTAssertTrue(panel.isVisible)
         print("Quick Chat reopened: visible=\(panel.isVisible)")
         controller.setEnabled(false)
@@ -70,15 +68,11 @@ final class QuickChatPresentationTests: XCTestCase {
         print("Quick Chat disabled: visible=\(controller.isVisible), shortcutRegistered=\(shortcut != nil)")
     }
 
-    private func waitUntil(_ label: String, _ condition: () -> Bool) async throws {
-        // TEMP-DIAG2: name the failing wait now that quiescence holds. Revert after diagnosis.
-        let start = ContinuousClock.now
-        let deadline = start + .seconds(5)
+    private func waitUntil(_ condition: () -> Bool) async throws {
+        let deadline = ContinuousClock.now + .seconds(5)
         while !condition(), ContinuousClock.now < deadline {
             try await Task.sleep(for: .milliseconds(10))
         }
-        let passed = condition()
-        print("TEMP-DIAG2 QuickChat wait \(label): \(passed ? "passed" : "TIMED OUT") elapsed=\(start.duration(to: ContinuousClock.now))")
-        XCTAssertTrue(passed)
+        XCTAssertTrue(condition())
     }
 }
