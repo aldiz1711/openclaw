@@ -1,4 +1,3 @@
-import { findNormalizedProviderValue } from "@openclaw/model-catalog-core/provider-id";
 // Litellm plugin entrypoint registers its OpenClaw integration.
 import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
 import {
@@ -6,13 +5,15 @@ import {
   type OpenClawPluginApi,
   type ProviderAuthMethodNonInteractiveContext,
 } from "openclaw/plugin-sdk/plugin-entry";
-import { normalizeOptionalSecretInput } from "openclaw/plugin-sdk/provider-auth";
+import {
+  findNormalizedProviderValue,
+  normalizeOptionalSecretInput,
+} from "openclaw/plugin-sdk/provider-auth";
 import { buildOpenAICompatibleProviderCatalog } from "openclaw/plugin-sdk/provider-catalog-live-runtime";
 import { createProviderApiKeyAuthMethod } from "openclaw/plugin-sdk/provider-entry";
-import { normalizeOptionalString } from "openclaw/plugin-sdk/string-coerce-runtime";
 import { buildLitellmImageGenerationProvider } from "./image-generation-provider.js";
-import { applyLitellmConfig, LITELLM_BASE_URL, LITELLM_DEFAULT_MODEL_REF } from "./onboard.js";
-import { buildLitellmModelDiscovery, buildLitellmProvider } from "./provider-catalog.js";
+import { applyLitellmConfig, LITELLM_DEFAULT_MODEL_REF } from "./onboard.js";
+import { buildLitellmProvider } from "./provider-catalog.js";
 
 const PROVIDER_ID = "litellm";
 
@@ -96,16 +97,18 @@ export default definePluginEntry({
       catalog: {
         order: "simple",
         run: (ctx) => {
-          const explicitBaseUrl = normalizeOptionalString(
-            findNormalizedProviderValue(ctx.config.models?.providers, PROVIDER_ID)?.baseUrl,
-          );
+          // LiteLLM serves models at both /models and /v1/models, and operators
+          // configure bases with or without /v1; the shared join does not dedupe it.
+          const explicitBaseUrl =
+            findNormalizedProviderValue(ctx.config.models?.providers, PROVIDER_ID)?.baseUrl ?? "";
+          const versionedBaseUrl = /\/v1\/*$/.test(explicitBaseUrl.trim());
           return buildOpenAICompatibleProviderCatalog({
             discoveryMode: "strict",
             ctx,
             providerId: PROVIDER_ID,
             buildProvider: buildLitellmProvider,
             allowExplicitBaseUrl: true,
-            modelDiscovery: buildLitellmModelDiscovery(explicitBaseUrl ?? LITELLM_BASE_URL),
+            modelDiscovery: { endpointPath: versionedBaseUrl ? "models" : "v1/models" },
           });
         },
       },
