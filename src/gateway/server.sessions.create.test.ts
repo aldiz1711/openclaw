@@ -6420,6 +6420,40 @@ test("sessions.create applies configured fixed-store ownership to bare keys", as
   }
 });
 
+test("sessions.create infers the child owner from an agent-prefixed parent", async () => {
+  await createSessionStoreDir();
+  testState.agentsConfig = {
+    ownership: "explicit",
+    entries: { main: {}, ops: {} },
+  };
+  testState.agentConfig = {};
+  const { clearConfigCache, clearRuntimeConfigSnapshot } = await getGatewayConfigModule();
+  clearRuntimeConfigSnapshot();
+  clearConfigCache();
+  try {
+    const parent = await directSessionReq<{ key?: string; sessionId?: string }>("sessions.create", {
+      key: "agent:ops:main",
+    });
+    expect(parent.ok, JSON.stringify(parent)).toBe(true);
+
+    const child = await directSessionReq<{
+      key?: string;
+      entry?: { parentSessionKey?: string; parentSessionId?: string };
+    }>("sessions.create", {
+      parentSessionKey: "agent:ops:main",
+      emitCommandHooks: true,
+      succeedsParent: false,
+    });
+    expect(child.ok, JSON.stringify(child)).toBe(true);
+    expect(child.payload?.key).toMatch(/^agent:ops:dashboard:/u);
+    expect(child.payload?.entry?.parentSessionKey).toBe("agent:ops:main");
+    expect(child.payload?.entry?.parentSessionId).toBe(parent.payload?.sessionId);
+  } finally {
+    testState.agentsConfig = undefined;
+    testState.agentConfig = {};
+  }
+});
+
 test("sessions.create stores selected global sessions in the requested agent store", async () => {
   const { mainStorePath, workStorePath } = await createSelectedGlobalSessionStore();
   const broadcastToConnIds = vi.fn();
